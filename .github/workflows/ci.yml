@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify app and container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - name: Install exact lockfile
+        run: npm ci
+      - name: Test SDK contracts and local storage
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build production application
+        run: npm run build
+      - name: Install isolated browser-test runtime
+        run: npx playwright install --with-deps chromium
+      - name: Exercise real browser flows
+        run: npm run test:e2e
+      - name: Build production container
+        run: docker build --tag e6tz-reference:ci .
+      - name: Smoke-test container health and non-root runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker logs e6tz-smoke; docker rm -f e6tz-smoke >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name e6tz-smoke --health-interval=2s --health-start-period=5s e6tz-reference:ci
+          test "$(docker exec e6tz-smoke id -u)" != "0"
+          for attempt in $(seq 1 30); do
+            state="$(docker inspect --format='{{.State.Health.Status}}' e6tz-smoke)"
+            if [ "$state" = healthy ]; then exit 0; fi
+            if [ "$state" = unhealthy ]; then exit 1; fi
+            sleep 2
+          done
+          echo 'Container did not become healthy within 60 seconds.' >&2
+          exit 1
+
+  publish-container:
+    name: Publish verified container to GHCR
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/enry6tz/flags-report-toolkit-demo-nextjs
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish this verified commit
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:main
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
