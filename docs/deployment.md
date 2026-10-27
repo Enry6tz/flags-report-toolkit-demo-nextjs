@@ -1,6 +1,6 @@
 # Deploy the integration reference
 
-The source is [Enry6tz/flags-report-toolkit-demo-nextjs](https://github.com/Enry6tz/flags-report-toolkit-demo-nextjs). The repository defines a deployable container and a verification/image-publication workflow. These files do not themselves configure a VPS, domain or Dokploy application.
+The source is [Enry6tz/flags-report-toolkit-demo-nextjs](https://github.com/Enry6tz/flags-report-toolkit-demo-nextjs). The public reference is [demo.6tz.tech](https://demo.6tz.tech). GitHub Actions verifies the application, publishes the container, triggers the configured Dokploy application and checks the live revision. A fork must configure its own hosting and secret; source files do not provision a VPS or DNS.
 
 ## Runtime contract
 
@@ -50,7 +50,21 @@ ghcr.io/enry6tz/flags-report-toolkit-demo-nextjs:sha-<full-commit-sha>
 
 Pull requests cannot publish. Workflow permissions default to `contents: read`; only the publishing job receives `packages: write`. The built-in `GITHUB_TOKEN` authenticates publication, so no separate registry password is embedded in this repository. Account/package policies can still reject publication; check the actual run result.
 
-Publication is **not a VPS deploy job**. There is no webhook secret, remote shell command or pretend deployment step. GHCR package visibility is separate from repository visibility: verify access before configuring an anonymous image pull, or supply authorized registry access in the hosting platform.
+GHCR package visibility is separate from repository visibility: verify access before configuring an anonymous image pull, or supply authorized registry access in the hosting platform.
+
+## CI-gated image rollout
+
+The configured demo uses Dokploy's **Docker** provider with the public GHCR `:main` image, port **3000**, and Auto Deploy enabled. DNS points `demo.6tz.tech` at the VPS and Dokploy manages its Let's Encrypt certificate. No source-push webhook is installed: rollout happens only after this workflow's successful verification and publication jobs.
+
+The repository secret **`DOKPLOY_DEPLOY_WEBHOOK`** contains the existing application-scoped webhook, not a server-wide API key. Obtain it from that application's Deployments tab and store it under **Settings → Secrets and variables → Actions**. Never commit it, print it, put it in an Actions variable or share it in an issue. The application itself still needs no secrets. Anyone allowed to change trusted workflows can potentially use repository secrets; keep write access restricted.
+
+The deployment job sends a GHCR `registry_package` JSON event with the exact image/tag and commit SHA. For Dokploy v0.30.8 it requires **HTTP 200** and the exact acceptance message; a 301 image/tag mismatch is an error, not success. Acceptance means queued, not healthy. The script sends one POST only: an uncertain request fails with a sanitized error so an operator can inspect Dokploy before retrying.
+
+Docker builds generate **`/release.json`** containing only the public source revision supplied by `SOURCE_REVISION`. CI checks that marker in the healthy test container. After triggering rollout, it waits up to five minutes for the HTTPS marker to match the triggering commit and for `/reports` to respond with 200. A stale page or an accepted webhook alone cannot pass deployment. Local Docker builds default to revision `local`; no browser records or secrets are included in the marker.
+
+Workflow runs for the same branch are serialized rather than cancelling an in-flight rollout. GitHub may replace a pending run with a newer pending run; the running release completes before the next one publishes. Failed verification cannot publish or deploy. Failed rollout leaves the workflow failed and must be investigated; there is no automatic destructive rollback.
+
+Run deterministic deployment checks with `node --test tests/deployment.test.mjs`. Do not run `node scripts/deploy.mjs` with production credentials just to test syntax: that command triggers a real deployment. Forks need to adapt the fixed public site/image allowlist in the script as well as their secret. The [Dokploy webhook documentation](https://docs.dokploy.com/docs/core/auto-deploy) describes the provider setup.
 
 ## Dokploy source-build configuration
 

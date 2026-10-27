@@ -11,6 +11,8 @@ RUN npm ci --no-audit --no-fund
 FROM base AS builder
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
+ARG SOURCE_REVISION=local
+RUN node -e "const revision=process.env.SOURCE_REVISION;if(!/^(local|[a-f0-9]{40})$/.test(revision))process.exit(1);require('node:fs').writeFileSync('public/release.json',JSON.stringify({revision}))"
 RUN npm run build
 
 FROM base AS runner

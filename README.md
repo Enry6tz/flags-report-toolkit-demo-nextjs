@@ -2,7 +2,7 @@
 
 A browser-local Next.js reference host for **@e6tz/reports 0.1.1**, **@e6tz/flags 0.1.1** and **@e6tz/toolkit 0.9.4**. The integrations use the actual published packages, not simulated SDK implementations.
 
-[Source repository](https://github.com/Enry6tz/flags-report-toolkit-demo-nextjs) · [Deployment guide](docs/deployment.md) · [MIT license](LICENSE)
+[Live demo](https://demo.6tz.tech) · [Source repository](https://github.com/Enry6tz/flags-report-toolkit-demo-nextjs) · [Deployment guide](docs/deployment.md) · [MIT license](LICENSE)
 
 ## Run locally
 
@@ -58,12 +58,13 @@ docker run --rm --publish 5600:3000 e6tz-reference:local
 
 The container runs the Next.js standalone server as a non-root user, listening on port **3000**. No database, application volume or secrets are required. Browser records stay in each visitor's localStorage, not on the VPS.
 
-GitHub Actions validates the application, browser flows and container. Only after those checks pass on `main` does its publishing job upload `main` and `sha-<commit>` tags to `ghcr.io/enry6tz/flags-report-toolkit-demo-nextjs`. It uses the built-in GitHub token; there is no NPM publication or hardcoded deployment webhook. Dokploy source builds or image deployment are a separate operation. See [deployment and rollback](docs/deployment.md).
+GitHub Actions validates the application, browser flows and container. Only after those checks pass on `main` does its publishing job upload `main` and `sha-<commit>` tags to `ghcr.io/enry6tz/flags-report-toolkit-demo-nextjs`. The following job triggers the scoped Dokploy webhook from the encrypted `DOKPLOY_DEPLOY_WEBHOOK` repository secret and verifies that the live HTTPS revision matches the commit. There is no NPM publication, hardcoded webhook or remote shell access. The application itself still requires no secrets. See [deployment and rollback](docs/deployment.md).
 
 ## Verify
 
 ```sh
 npm test
+node --test tests/deployment.test.mjs
 npm run typecheck
 npm run build
 npm run test:e2e
